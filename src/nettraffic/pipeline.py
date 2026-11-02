@@ -106,13 +106,13 @@ def stage_ingest(cfg: PipelineConfig, milan_dir: Path | None) -> LoadedData:
         from nettraffic.data.milan import load_milan
 
         df = load_milan(milan_dir)
-        write_partitioned(df, raw_root)
+        write_partitioned(df, raw_root, overwrite=True)
         return LoadedData(raw_root, None, None, [], {})
 
     from nettraffic.data.synthetic import generate
 
     ds = generate(cfg)
-    write_partitioned(ds.raw, raw_root)
+    write_partitioned(ds.raw, raw_root, overwrite=True)
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     ds.cells.to_parquet(cfg.data_dir / "cells.parquet", index=False)
     ds.labels.to_parquet(cfg.data_dir / "labels.parquet", index=False)
@@ -418,6 +418,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     r.add_argument("--cells", type=int, default=None)
     r.add_argument("--days", type=int, default=None)
+    r.add_argument("--seed", type=int, default=None, help="synthetic scenario seed (default 42)")
     r.add_argument("--tune-trials", type=int, default=None, help="Optuna trials (0 = off)")
     r.add_argument("--no-stat-models", action="store_true", help="skip SARIMA/Prophet benchmarks")
     r.add_argument("--no-mlflow", action="store_true")
@@ -450,6 +451,8 @@ def main(argv: list[str] | None = None) -> None:
         overrides["n_cells"] = a.cells
     if a.days is not None:
         overrides["n_days"] = a.days
+    if a.seed is not None:
+        overrides["seed"] = a.seed
     if a.tune_trials is not None:
         overrides["optuna_trials"] = a.tune_trials
     if a.no_mlflow:

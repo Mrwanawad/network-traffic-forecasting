@@ -1,0 +1,10 @@
+// Cloudflare Workers static-assets deploy of the dashboard (no server code).
+// Workers Builds runs `npx wrangler deploy` on every push to the production branch.
+{
+  "name": "network-traffic-forecasting",
+  "compatibility_date": "2025-01-01",
+  "assets": {
+    "directory": "./site",
+    "not_found_handling": "single-page-application"
+  }
+}

@@ -2,6 +2,8 @@
 
 Forecast telecom traffic (SMS, calls, internet) per cell, flag abnormal drops and spikes before customers complain, and point out cells that are about to run out of capacity.
 
+**Live dashboard:** https://network-traffic-forecasting.mrwaanawad.workers.dev, refreshed every day by GitHub Actions (see [Automated daily refresh](#automated-daily-refresh)).
+
 The full design is in [`docs/architecture.md`](docs/architecture.md). This README covers how the code maps to it, how to run it, and what the numbers look like.
 
 ## Results (synthetic run: 500 cells, 61 days, 3 evaluated backtest folds)
@@ -103,8 +105,10 @@ src/nettraffic/
   export.py        compact JSON for the static dashboard
   pipeline.py      orchestration + CLI
   api/app.py       FastAPI: /forecast, /anomalies, /capacity, /health
-site/              static dashboard (Plotly.js) for Cloudflare Pages
+site/              static dashboard (Plotly.js), served by Cloudflare
 dags/              Airflow DAG (thin wrapper around the CLI)
+.github/workflows/ CI (lint, tests, smoke run, Docker build) + daily dashboard refresh
+wrangler.jsonc     Cloudflare static-assets config (serves site/)
 ```
 
 ### Decisions worth knowing
@@ -135,11 +139,39 @@ dags/              Airflow DAG (thin wrapper around the CLI)
 - Voice degradation (calls down to 20-45% for a few hours) is the weakest class: on quiet cells it sits inside normal Poisson noise. A per-metric threshold or a longer-window detector would help.
 - 61 days of history contain only a couple of holidays, so Christmas-week forecasts are weaker. Real deployments need at least a year for holiday effects.
 - Statistical models use a fixed specification, not per-series order selection.
-- The Docker image was written but not built in this environment (no Docker daemon).
+- The Docker image is built and health-checked in CI, not locally.
 
 ## Deployment
 
-The dashboard is static: everything it shows is precomputed into `site/data/`. Point Cloudflare Pages at `site/` (no build command). Refresh = rerun the pipeline and push `site/data`. The Airflow DAG in `dags/` does exactly that on a schedule.
+The dashboard is static: everything it shows is precomputed into `site/data/`, so there is no server to scale, nothing to cold-start, and nothing to pay for. Cloudflare serves `site/` as static assets (`wrangler.jsonc`) and redeploys on every push to `main`.
+
+```
+GitHub Actions (daily 03:17 UTC)                     Cloudflare
+  install -> nettraffic run -> site/data/*.json  --push main-->  rebuild -> *.workers.dev
+```
+
+## Automated daily refresh
+
+`.github/workflows/refresh-dashboard.yml` closes the loop from model to screen with nobody in it. Every day it:
+
+1. Installs the package on a clean runner (CPU-only PyTorch, about 1.5 GB smaller than the CUDA wheel).
+2. Runs the **whole** batch pipeline from scratch: ingest -> clean -> backtest -> retrain -> 7-day forecast with intervals -> anomaly detection -> capacity -> monitoring -> export.
+3. Commits the new `site/data/` to `main` as `github-actions[bot]`, with `[skip ci]` so the data commit does not re-trigger CI.
+4. Cloudflare picks up the push and redeploys. The run's metrics (`run_summary.json`, `detection_eval.json`, backtest CSVs) are kept as a workflow artifact for 14 days, so you can compare model quality across days.
+
+Details that matter:
+
+- **A new scenario every day.** On synthetic data the seed is the run date (`--seed 20261102`), so each refresh is a different month of traffic with different outages and spikes, not the same picture re-rendered. A manual run can pin a seed to reproduce a day exactly.
+- **Two modes.** The scheduled run skips SARIMA/Prophet and Optuna (about 10 min on a 4-core runner). Run it manually with **full = true** (Actions -> Refresh dashboard -> Run workflow) to include the per-series benchmarks and 12 Optuna trials (about 15-20 min; 13 min on a 4-core machine during development).
+- **Safe by construction.** `concurrency` stops two refreshes racing on `main`. The commit step exits cleanly when nothing changed. The job has a 75-minute timeout, and only `contents: write` permission.
+- **Retrain is built in.** Every refresh retrains from scratch, and `monitoring.json` records whether the model lost to seasonal-naive for 2 consecutive folds (the retrain trigger). The Monitoring tab shows it.
+- **Switching to real data** is one line: replace the `nettraffic run $ARGS` command with `nettraffic run --milan-dir <path> --no-stat-models` once the feed lands somewhere the runner can read.
+
+If `main` gets branch protection, allow `github-actions[bot]` to push, or the commit step fails.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every PR and every push to `main`: ruff lint and format check, the pytest suite, a 60-cell end-to-end pipeline smoke run, and a Docker build whose container must answer `/health` within 60 s.
 
 The API image (`Dockerfile`, `docker-compose.yml`) serves the same batch outputs for on-demand queries:
 

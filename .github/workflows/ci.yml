@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths-ignore: ["site/data/**"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install (CPU-only torch)
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -e ".[all]"
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Tests
+        run: pytest
+      - name: Pipeline smoke run
+        run: nettraffic run --quick --no-stat-models --no-mlflow --artifacts /tmp/qa --site-data /tmp/qsite
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: nettraffic:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Container answers /health
+        run: |
+          mkdir -p artifacts
+          docker run -d --name api -p 8000:8000 -v "$PWD/artifacts:/app/artifacts" nettraffic:ci
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8000/health && exit 0; sleep 2; done
+          docker logs api; exit 1
