@@ -4,7 +4,38 @@ Forecast telecom traffic (SMS, calls, internet) per cell, flag abnormal drops an
 
 The full design is in [`docs/architecture.md`](docs/architecture.md). This README covers how the code maps to it, how to run it, and what the numbers look like.
 
-<!-- RESULTS -->
+## Results (synthetic run: 500 cells, 61 days, 3 evaluated backtest folds)
+
+Forecasting, all cells, rolling-origin backtest (MASE < 1 means better than seasonal naive in-sample):
+
+| Model | MAE | sMAPE | MASE | 90% PI coverage |
+|---|---|---|---|---|
+| LightGBM global (Optuna, 12 trials) | 31.1 | 37.0% | **0.909** | 89.1% |
+| Seasonal naive (weekly) | 36.5 | 38.4% | 1.093 | 89.2% |
+
+By horizon bucket the global model wins everywhere except one spot: at lead exactly 1h, SMS is worse than naive (0.85 vs 0.68). That is 1.5k single-hour points landing on festive midnights; it's noisy but real, so it stays in the report. The 2-24h bucket is above 1.0 for both models because it covers Dec 8 and Christmas.
+
+Per-series models on a volume-stratified sample of 8 cells (internet + call_in), 25-168h bucket:
+
+| Model | MASE | Coverage | Backtest wall time |
+|---|---|---|---|
+| LightGBM global | **0.901** | 87.3% | 287 s for all 500 cells x 5 metrics |
+| Seasonal naive | 1.066 | 88.0% | <1 s |
+| Prophet | 1.249 | 88.4% | 9 s for 8 cells x 2 metrics |
+| SARIMA(1,0,1)(1,1,1)24 | 1.509 | 89.0% | 185 s for 8 cells x 2 metrics |
+
+Anomaly detection on the last 14 days (153 labelled anomalies, alert threshold 4.5):
+
+| | Precision | Recall | F1 | Notes |
+|---|---|---|---|---|
+| Event level | 73.8% | 67.3% | 0.70 | 10.4 alerts/day, 1.8 incidents per operator shift, mean time to detect 0.4 h |
+| Point level, ensemble | 78.3% | 51.0% | 0.62 | PR-AUC 0.548 |
+| Point level, LSTM-AE alone | 24.0% | 48.6% | 0.32 | PR-AUC 0.388 |
+| Point level, residual alone | 17.8% | 30.7% | 0.23 | PR-AUC 0.212 |
+| Point level, Isolation Forest alone | 5.2% | 27.7% | 0.09 | PR-AUC 0.159 |
+
+Recall by type: outage 100%, congestion spike 100%, partial outage 73%, unscheduled event 63%, voice degradation 0%. The ensemble beats every single detector, which is the point of having three.
+
 
 ## Quick start
 
