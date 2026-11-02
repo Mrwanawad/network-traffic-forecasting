@@ -92,7 +92,7 @@ dags/              Airflow DAG (thin wrapper around the CLI)
 
 **Anomaly scores are probabilities, not magic numbers.** Every detector's raw score is mapped to `-log10(P(score >= x | normal))` using its own held-out null distribution, with an exponential peaks-over-threshold tail so strong anomalies keep separating instead of saturating at `1/n`. A weighted mean of those surprisals is unit-consistent.
 
-**The residual detector is standardised per cell.** Pooling residuals across cells let noisy quiet cells define the tail, which made a 3x spike on a busy cell look normal. Per-cell robust scale (MAD of out-of-sample residuals) fixed that: ensemble PR-AUC went from 0.36 to 0.49 on the same data.
+**The residual detector is standardised per cell.** Pooling residuals across cells let noisy quiet cells define the tail, which made a 3x spike on a busy cell look normal. Per-cell robust scale (MAD of out-of-sample residuals) fixed that: in a development run (500 cells) ensemble PR-AUC went from 0.36 to 0.49 with nothing else changed.
 
 **Echo suppression.** The day-ahead model uses `t-24` lags, so yesterday's outage would create today's fake spike. A second pass replaces strong deviations with their expected value before recomputing expectations.
 

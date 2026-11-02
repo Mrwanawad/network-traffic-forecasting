@@ -23,14 +23,29 @@ def error_drift(preds: pd.DataFrame, model: str, baseline: str = "seasonal_naive
     return g
 
 
-def per_cell_drift(preds: pd.DataFrame, model: str) -> pd.DataFrame:
-    """Rolling (per-fold) MASE per cell; flags cells whose error keeps growing."""
-    ev = preds[(preds["model"] == model) & (preds["fold"] > 0)].copy()
+def per_cell_drift(preds: pd.DataFrame, model: str, baseline: str = "seasonal_naive") -> pd.DataFrame:
+    """Per-cell MASE on the latest fold vs. the baseline and vs. the cell's own history.
+
+    A cell is `degrading` when the model loses to seasonal-naive on the latest
+    fold AND its error grew vs. its mean over earlier folds by > 25%. Comparing
+    to the baseline filters out periods that are hard for everyone (holidays).
+    """
+    ev = preds[preds["model"].isin([model, baseline]) & (preds["fold"] > 0)].copy()
     ev["ase"] = (ev["y"] - ev["yhat"]).abs() / ev["scale"]
-    per = ev.groupby(["cell_id", "fold"])["ase"].mean().unstack("fold")
-    last = per.columns.max()
-    out = pd.DataFrame({"mase_last": per[last], "mase_mean": per.mean(axis=1)})
-    out["degrading"] = (per.diff(axis=1).iloc[:, 1:] > 0).all(axis=1) & (out["mase_last"] > 1.0)
+    per = ev.groupby(["model", "cell_id", "fold"])["ase"].mean()
+    last = int(ev["fold"].max())
+    m = per.loc[model].unstack("fold")
+    b = per.loc[baseline].unstack("fold")
+    out = pd.DataFrame(
+        {
+            "mase_last": m[last],
+            "mase_prev_mean": m.drop(columns=last).mean(axis=1) if m.shape[1] > 1 else m[last],
+            "baseline_last": b[last],
+        }
+    )
+    out["degrading"] = (out["mase_last"] > out["baseline_last"]) & (
+        out["mase_last"] > 1.25 * out["mase_prev_mean"]
+    )
     return out.reset_index()
 
 

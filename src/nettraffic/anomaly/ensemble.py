@@ -140,15 +140,16 @@ def build_events(
     if cell_meta is not None and "base_volume" in cell_meta:
         thr = cell_meta["base_volume"].quantile(busy_quantile)
         busy = set(cell_meta.loc[cell_meta["base_volume"] >= thr, "cell_id"].astype(int))
-    ev["severity"] = [_severity(r, busy) for r in ev.itertuples()]
+    ev["severity"] = [_severity(r, busy, threshold) for r in ev.itertuples()]
     ev["severity_rank"] = ev["severity"].map({s: i for i, s in enumerate(SEVERITY_ORDER)})
     ev = ev.sort_values(["severity_rank", "score"], ascending=[False, False]).reset_index(drop=True)
     ev.insert(0, "event_id", np.arange(1, len(ev) + 1))
     return ev.drop(columns="severity_rank")
 
 
-def _severity(r, busy: set[int]) -> str:
-    level = 2 if r.score >= 4 else 1 if r.score >= 3 else 0
+def _severity(r, busy: set[int], threshold: float) -> str:
+    """Tiers are relative to the alert threshold: +1 surprisal = 10x rarer."""
+    level = 2 if r.score >= threshold + 2 else 1 if r.score >= threshold + 1 else 0
     if r.direction == "drop" and r.deviation_pct <= -80 and r.incident_metrics >= 3:
         return "critical"  # looks like a site outage
     if r.direction == "drop" and r.cell_id in busy:

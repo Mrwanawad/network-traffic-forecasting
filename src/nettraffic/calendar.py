@@ -14,6 +14,8 @@ import holidays
 import numpy as np
 import pandas as pd
 
+EVE_DAYS = ("12-24", "12-31")
+
 
 @dataclass(frozen=True)
 class ScheduledEvent:
@@ -32,6 +34,7 @@ class CalendarFeatures:
     hour_of_week: np.ndarray
     is_weekend: np.ndarray
     is_holiday: np.ndarray
+    is_eve: np.ndarray  # Christmas Eve / New Year's Eve: atypical evenings, not public holidays
     local_date: np.ndarray = field(repr=False)
 
     @property
@@ -57,6 +60,7 @@ def calendar_features(index: pd.DatetimeIndex, tz: str, country: str) -> Calenda
         hour_of_week=dow * 24 + hour,
         is_weekend=dow >= 5,
         is_holiday=np.isin(local_date, list(hol)) if hol else np.zeros(len(index), bool),
+        is_eve=np.isin(local.strftime("%m-%d"), list(EVE_DAYS)),
         local_date=local_date.to_numpy(),
     )
 

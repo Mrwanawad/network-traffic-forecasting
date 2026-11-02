@@ -18,6 +18,12 @@ const pct = (v, d = 1) => (v === null || v === undefined ? "–" : `${(100 * v).
 const shortTs = (iso) => (iso ? new Date(iso).toISOString().slice(5, 16).replace("T", " ") : "–");
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+function hourly(startIso, n) {
+  if (!startIso) return [];
+  const t0 = Date.parse(startIso);
+  return Array.from({ length: n }, (_, i) => new Date(t0 + i * 3600e3).toISOString());
+}
+
 async function getJSON(path) {
   const r = await fetch(path, { cache: "no-cache" });
   if (!r.ok) throw new Error(`${path}: ${r.status}`);
@@ -229,7 +235,8 @@ async function loadCell() {
   $("#cell-meta").textContent = [c.area_type, c.capacity_internet ? `capacity ${fmtInt(c.capacity_internet)}` : null, c.capacity_status]
     .filter(Boolean).join(" · ");
   const s = doc.metrics[m];
-  const x = doc.history_ts;
+  const x = hourly(doc.history_start, doc.history_len);
+  const fx = hourly(doc.forecast_start, doc.forecast_len);
   const accent = css("--accent"), muted = css("--muted"), bad = css("--bad"), fc = "#f59e0b";
   const band = (xs, lo, hi, color, name) => [
     { x: xs, y: hi, mode: "lines", line: { width: 0 }, hoverinfo: "skip", showlegend: false, type: "scatter" },
@@ -239,8 +246,8 @@ async function loadCell() {
   if (s.expected) traces.push(...band(x, s.lo, s.hi, "rgba(100,116,139,0.18)", "expected band"));
   traces.push({ x, y: s.actual, name: "actual", mode: "lines", line: { color: accent, width: 1.8 }, type: "scatter" });
   if (s.expected) traces.push({ x, y: s.expected, name: "expected", mode: "lines", line: { color: muted, width: 1.2, dash: "dot" }, type: "scatter" });
-  traces.push(...band(s.forecast_ts, s.forecast_lo, s.forecast_hi, "rgba(245,158,11,0.18)", "forecast interval"));
-  traces.push({ x: s.forecast_ts, y: s.forecast, name: "forecast", mode: "lines", line: { color: fc, width: 2 }, type: "scatter" });
+  traces.push(...band(fx, s.forecast_lo, s.forecast_hi, "rgba(245,158,11,0.18)", "forecast interval"));
+  traces.push({ x: fx, y: s.forecast, name: "forecast", mode: "lines", line: { color: fc, width: 2 }, type: "scatter" });
 
   const cellAlerts = state.data.alerts.alerts.filter((a) => a.cell_id === id);
   const shapes = cellAlerts.filter((a) => a.metric === m).map((a) => ({
@@ -292,13 +299,13 @@ function renderAlerts() {
 /* ------------------------------------------------------------------ models */
 function renderModels() {
   const { models } = state.data;
-  const byH = models.by_horizon || [];
-  const modelsList = [...new Set(byH.map((r) => r.model))];
-  const metrics = [...new Set(byH.map((r) => r.metric))];
-  const horizons = ["1h", "24h", "168h"];
-  const traces = modelsList.flatMap((mod, i) => horizons.map((h, j) => ({
+  const byB = models.by_bucket || [];
+  const modelsList = [...new Set(byB.map((r) => r.model))];
+  const metrics = [...new Set(byB.map((r) => r.metric))];
+  const buckets = [["1h", "1h"], ["24h", "2–24h"], ["168h", "25–168h"]];
+  const traces = modelsList.flatMap((mod, i) => buckets.map(([b, label], j) => ({
     type: "bar", name: `${MODEL_LABEL[mod] || mod}`, legendgroup: mod, showlegend: j === 0,
-    x: metrics.map((m) => `${m}<br>${h}`), y: metrics.map((m) => byH.find((r) => r.model === mod && r.metric === m && r.horizon === h)?.mase),
+    x: metrics.map((m) => `${m}<br>${label}`), y: metrics.map((m) => byB.find((r) => r.model === mod && r.metric === m && r.bucket === b)?.mase),
     marker: { color: palette()[i] }, offsetgroup: mod, hovertemplate: "%{x}: MASE %{y:.3f}<extra>" + mod + "</extra>",
   })));
   Plotly.newPlot("mase-h", traces, layout({

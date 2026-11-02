@@ -79,7 +79,7 @@ class PipelineConfig:
     capacity_warn_utilisation: float = 0.85
 
     # --- export ----------------------------------------------------------------
-    export_top_cells: int = 60
+    export_top_cells: int = 40
     export_history_days: int = 14
 
     def to_params(self) -> dict[str, Any]:
