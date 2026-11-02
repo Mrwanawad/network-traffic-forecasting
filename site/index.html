@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Network Traffic Ops</title>
+  <meta name="description" content="Per-cell telecom traffic forecasts, anomaly alerts and capacity flags." />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="dot"></span>
+      <div>
+        <h1>Network Traffic Ops</h1>
+        <p class="sub" id="subtitle">loading…</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="map">Map</button>
+      <button class="tab" data-tab="cell">Cell explorer</button>
+      <button class="tab" data-tab="alerts">Alerts</button>
+      <button class="tab" data-tab="models">Models</button>
+      <button class="tab" data-tab="capacity">Capacity</button>
+      <button class="tab" data-tab="monitoring">Monitoring</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- OVERVIEW -->
+    <section class="panel active" id="overview">
+      <div class="kpis" id="kpis"></div>
+      <div class="grid2">
+        <div class="card"><h3>Daily traffic (all cells)</h3><div class="chart" id="daily"></div></div>
+        <div class="card">
+          <h3>Normalised traffic by area &amp; hour of week <select id="heat-metric"></select></h3>
+          <div class="chart" id="heat"></div>
+        </div>
+      </div>
+      <div class="card"><h3>Top alerts</h3><div id="top-alerts"></div></div>
+    </section>
+
+    <!-- MAP -->
+    <section class="panel" id="map">
+      <div class="card">
+        <h3>Mean internet traffic per cell, local hour
+          <input type="range" id="hour" min="0" max="23" value="12" /> <span id="hour-label" class="pill">12:00</span>
+        </h3>
+        <p class="hint">Grid squares follow the Milan grid layout. Rings mark cells with alerts. Click a cell to open it.</p>
+        <div class="chart tall" id="gridmap"></div>
+      </div>
+    </section>
+
+    <!-- CELL -->
+    <section class="panel" id="cell">
+      <div class="card controls">
+        <label>Cell <select id="cell-select"></select></label>
+        <label>Metric <select id="metric-select"></select></label>
+        <span class="hint" id="cell-meta"></span>
+      </div>
+      <div class="card">
+        <h3>Actual vs. expected (detection window) and 7-day forecast</h3>
+        <div class="chart tall" id="cell-chart"></div>
+      </div>
+      <div class="card"><h3>Alerts on this cell</h3><div id="cell-alerts"></div></div>
+    </section>
+
+    <!-- ALERTS -->
+    <section class="panel" id="alerts">
+      <div class="card controls">
+        <label>Min severity
+          <select id="sev-filter">
+            <option value="0">low</option><option value="1">medium</option>
+            <option value="2">high</option><option value="3">critical</option>
+          </select>
+        </label>
+        <label>Metric <select id="alert-metric"><option value="">all</option></select></label>
+        <span class="hint" id="alert-count"></span>
+      </div>
+      <div class="card" id="eval-card"><h3>Detection quality vs. labelled anomalies</h3><div id="eval"></div></div>
+      <div class="card"><div id="alerts-table"></div></div>
+    </section>
+
+    <!-- MODELS -->
+    <section class="panel" id="models">
+      <div class="card"><h3>MASE by horizon (all cells, rolling-origin backtest)</h3><div class="chart" id="mase-h"></div></div>
+      <div class="grid2">
+        <div class="card"><h3>Overall</h3><div id="overall"></div></div>
+        <div class="card"><h3>Per-series models on a stratified cell sample</h3><div id="sample"></div></div>
+      </div>
+      <div class="card"><h3>Slices (internet): busy vs. quiet cells, weekday vs. off-day</h3><div class="chart" id="slices"></div></div>
+    </section>
+
+    <!-- CAPACITY -->
+    <section class="panel" id="capacity">
+      <div class="card"><h3>Peak forecast utilisation (next 7 days, internet)</h3><div class="chart" id="cap-chart"></div></div>
+      <div class="card"><div id="cap-table"></div></div>
+    </section>
+
+    <!-- MONITORING -->
+    <section class="panel" id="monitoring">
+      <div class="kpis" id="mon-kpis"></div>
+      <div class="grid2">
+        <div class="card"><h3>Forecast error drift per fold (MASE)</h3><div class="chart" id="drift"></div></div>
+        <div class="card"><h3>Data health</h3><div id="health"></div></div>
+      </div>
+    </section>
+  </main>
+  <footer>Static dashboard · all numbers precomputed by the batch pipeline · <span id="generated"></span></footer>
+</body>
+</html>

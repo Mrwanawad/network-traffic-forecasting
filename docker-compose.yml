@@ -1,0 +1,16 @@
+services:
+  batch:
+    build: .
+    command: ["nettraffic", "run", "--no-mlflow"]
+    volumes:
+      - ./artifacts:/app/artifacts
+      - ./data:/app/data
+      - ./site/data:/app/site/data
+    profiles: ["batch"]
+  api:
+    build: .
+    ports: ["8000:8000"]
+    volumes:
+      - ./artifacts:/app/artifacts:ro
+    environment:
+      NETTRAFFIC_ARTIFACTS: /app/artifacts
