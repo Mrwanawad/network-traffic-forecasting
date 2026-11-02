@@ -47,7 +47,16 @@ def frame_records(df: pd.DataFrame) -> list[dict]:
 
 
 def _r(a: np.ndarray, nd: int = 1) -> list:
-    return [None if not np.isfinite(v) else round(float(v), nd) for v in np.asarray(a, dtype=float)]
+    """Compact numbers: integers above 100 (traffic counts), `nd` decimals below."""
+    out: list = []
+    for v in np.asarray(a, dtype=float):
+        if not np.isfinite(v):
+            out.append(None)
+        elif abs(v) >= 100:
+            out.append(round(v))
+        else:
+            out.append(round(v, nd))
+    return out
 
 
 def export_cell_series(
@@ -65,20 +74,30 @@ def export_cell_series(
         key: g.set_index("ts")[["expected", "lo", "hi", "score"]]
         for key, g in sel.groupby(["cell_id", "metric"])
     }
+    fut = forecasts.sort_values("ts")
+    f_start = fut["ts"].min()
+    f_len = int(fut["lead"].max()) if len(fut) else 0
     for cid in cell_ids:
         c = panel.cell_pos(cid)
-        doc: dict[str, Any] = {"cell_id": cid, "history_ts": [t.isoformat() for t in idx], "metrics": {}}
-        fc_c = forecasts[forecasts["cell_id"] == cid]
+        # timestamps are implicit: hourly from *_start, so they are not repeated per series
+        doc: dict[str, Any] = {
+            "cell_id": cid,
+            "history_start": idx[0].isoformat(),
+            "history_len": len(idx),
+            "forecast_start": f_start.isoformat() if len(fut) else None,
+            "forecast_len": f_len,
+            "metrics": {},
+        }
+        fc_c = fut[fut["cell_id"] == cid]
         for k, m in enumerate(panel.metrics):
             p = pts[(cid, m)].reindex(idx) if (cid, m) in pts else None
-            f = fc_c[fc_c["metric"] == m].sort_values("ts")
+            f = fc_c[fc_c["metric"] == m].sort_values("lead")
             doc["metrics"][m] = {
                 "actual": _r(panel.values[c, hist_start:, k]),
                 "expected": _r(p["expected"]) if p is not None else None,
                 "lo": _r(p["lo"]) if p is not None else None,
                 "hi": _r(p["hi"]) if p is not None else None,
                 "score": _r(p["score"], 2) if p is not None else None,
-                "forecast_ts": [t.isoformat() for t in f["ts"]],
                 "forecast": _r(f["yhat"]),
                 "forecast_lo": _r(f["lo"]),
                 "forecast_hi": _r(f["hi"]),

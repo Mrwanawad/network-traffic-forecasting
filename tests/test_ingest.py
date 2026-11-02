@@ -30,3 +30,16 @@ def test_partitioned_roundtrip(tmp_path) -> None:
     back = scan_partitioned(tmp_path, start="2024-01-02").collect()
     assert back.height == 4 and back["internet"].to_list() == [2, 3, 4, 5]
     assert isinstance(back, pl.DataFrame)
+
+
+def test_overwrite_drops_stale_partitions(tmp_path) -> None:
+    old = pd.DataFrame(
+        {"cell_id": 1, "ts": pd.date_range("2024-01-01", periods=72, freq="1h", tz="UTC"), "internet": 1}
+    )
+    new = pd.DataFrame(
+        {"cell_id": 2, "ts": pd.date_range("2024-01-01", periods=24, freq="1h", tz="UTC"), "internet": 2}
+    )
+    write_partitioned(old, tmp_path)
+    write_partitioned(new, tmp_path, overwrite=True)
+    back = scan_partitioned(tmp_path).collect()
+    assert back["cell_id"].unique().to_list() == [2] and back.height == 24

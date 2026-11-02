@@ -6,13 +6,22 @@ the window you need) and predicate pushdown on `date`.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pandas as pd
 import polars as pl
 
 
-def write_partitioned(df: pl.DataFrame | pd.DataFrame, root: Path) -> list[Path]:
+def write_partitioned(df: pl.DataFrame | pd.DataFrame, root: Path, overwrite: bool = False) -> list[Path]:
+    """Write one parquet file per UTC date.
+
+    overwrite=True removes the whole dataset first. Batch runs need it: a run with a
+    shorter date range would otherwise leave stale partitions from an older run
+    behind, and the reader would silently mix two datasets.
+    """
+    if overwrite and root.exists():
+        shutil.rmtree(root)
     if isinstance(df, pd.DataFrame):
         df = pl.from_pandas(df)
     df = df.with_columns(pl.col("ts").dt.convert_time_zone("UTC").dt.date().alias("date"))

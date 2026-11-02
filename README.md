@@ -2,9 +2,42 @@
 
 Forecast telecom traffic (SMS, calls, internet) per cell, flag abnormal drops and spikes before customers complain, and point out cells that are about to run out of capacity.
 
+**Live dashboard:** https://network-traffic-forecasting.mrwaanawad.workers.dev, refreshed every day by GitHub Actions (see [Automated daily refresh](#automated-daily-refresh)).
+
 The full design is in [`docs/architecture.md`](docs/architecture.md). This README covers how the code maps to it, how to run it, and what the numbers look like.
 
-<!-- RESULTS -->
+## Results (synthetic run: 500 cells, 61 days, 3 evaluated backtest folds)
+
+Forecasting, all cells, rolling-origin backtest (MASE < 1 means better than seasonal naive in-sample):
+
+| Model | MAE | sMAPE | MASE | 90% PI coverage |
+|---|---|---|---|---|
+| LightGBM global (Optuna, 12 trials) | 31.1 | 37.0% | **0.909** | 89.1% |
+| Seasonal naive (weekly) | 36.5 | 38.4% | 1.093 | 89.2% |
+
+By horizon bucket the global model wins everywhere except one spot: at lead exactly 1h, SMS is worse than naive (0.85 vs 0.68). That is 1.5k single-hour points landing on festive midnights; it's noisy but real, so it stays in the report. The 2-24h bucket is above 1.0 for both models because it covers Dec 8 and Christmas.
+
+Per-series models on a volume-stratified sample of 8 cells (internet + call_in), 25-168h bucket:
+
+| Model | MASE | Coverage | Backtest wall time |
+|---|---|---|---|
+| LightGBM global | **0.901** | 87.3% | 287 s for all 500 cells x 5 metrics |
+| Seasonal naive | 1.066 | 88.0% | <1 s |
+| Prophet | 1.249 | 88.4% | 9 s for 8 cells x 2 metrics |
+| SARIMA(1,0,1)(1,1,1)24 | 1.509 | 89.0% | 185 s for 8 cells x 2 metrics |
+
+Anomaly detection on the last 14 days (153 labelled anomalies, alert threshold 4.5):
+
+| | Precision | Recall | F1 | Notes |
+|---|---|---|---|---|
+| Event level | 73.8% | 67.3% | 0.70 | 10.4 alerts/day, 1.8 incidents per operator shift, mean time to detect 0.4 h |
+| Point level, ensemble | 78.3% | 51.0% | 0.62 | PR-AUC 0.548 |
+| Point level, LSTM-AE alone | 24.0% | 48.6% | 0.32 | PR-AUC 0.388 |
+| Point level, residual alone | 17.8% | 30.7% | 0.23 | PR-AUC 0.212 |
+| Point level, Isolation Forest alone | 5.2% | 27.7% | 0.09 | PR-AUC 0.159 |
+
+Recall by type: outage 100%, congestion spike 100%, partial outage 73%, unscheduled event 63%, voice degradation 0%. The ensemble beats every single detector, which is the point of having three.
+
 
 ## Quick start
 
@@ -72,8 +105,10 @@ src/nettraffic/
   export.py        compact JSON for the static dashboard
   pipeline.py      orchestration + CLI
   api/app.py       FastAPI: /forecast, /anomalies, /capacity, /health
-site/              static dashboard (Plotly.js) for Cloudflare Pages
+site/              static dashboard (Plotly.js), served by Cloudflare
 dags/              Airflow DAG (thin wrapper around the CLI)
+.github/workflows/ CI (lint, tests, smoke run, Docker build) + daily dashboard refresh
+wrangler.jsonc     Cloudflare static-assets config (serves site/)
 ```
 
 ### Decisions worth knowing
@@ -92,7 +127,7 @@ dags/              Airflow DAG (thin wrapper around the CLI)
 
 **Anomaly scores are probabilities, not magic numbers.** Every detector's raw score is mapped to `-log10(P(score >= x | normal))` using its own held-out null distribution, with an exponential peaks-over-threshold tail so strong anomalies keep separating instead of saturating at `1/n`. A weighted mean of those surprisals is unit-consistent.
 
-**The residual detector is standardised per cell.** Pooling residuals across cells let noisy quiet cells define the tail, which made a 3x spike on a busy cell look normal. Per-cell robust scale (MAD of out-of-sample residuals) fixed that: ensemble PR-AUC went from 0.36 to 0.49 on the same data.
+**The residual detector is standardised per cell.** Pooling residuals across cells let noisy quiet cells define the tail, which made a 3x spike on a busy cell look normal. Per-cell robust scale (MAD of out-of-sample residuals) fixed that: in a development run (500 cells) ensemble PR-AUC went from 0.36 to 0.49 with nothing else changed.
 
 **Echo suppression.** The day-ahead model uses `t-24` lags, so yesterday's outage would create today's fake spike. A second pass replaces strong deviations with their expected value before recomputing expectations.
 
@@ -104,11 +139,39 @@ dags/              Airflow DAG (thin wrapper around the CLI)
 - Voice degradation (calls down to 20-45% for a few hours) is the weakest class: on quiet cells it sits inside normal Poisson noise. A per-metric threshold or a longer-window detector would help.
 - 61 days of history contain only a couple of holidays, so Christmas-week forecasts are weaker. Real deployments need at least a year for holiday effects.
 - Statistical models use a fixed specification, not per-series order selection.
-- The Docker image was written but not built in this environment (no Docker daemon).
+- The Docker image is built and health-checked in CI, not locally.
 
 ## Deployment
 
-The dashboard is static: everything it shows is precomputed into `site/data/`. Point Cloudflare Pages at `site/` (no build command). Refresh = rerun the pipeline and push `site/data`. The Airflow DAG in `dags/` does exactly that on a schedule.
+The dashboard is static: everything it shows is precomputed into `site/data/`, so there is no server to scale, nothing to cold-start, and nothing to pay for. Cloudflare serves `site/` as static assets (`wrangler.jsonc`) and redeploys on every push to `main`.
+
+```
+GitHub Actions (daily 03:17 UTC)                     Cloudflare
+  install -> nettraffic run -> site/data/*.json  --push main-->  rebuild -> *.workers.dev
+```
+
+## Automated daily refresh
+
+`.github/workflows/refresh-dashboard.yml` closes the loop from model to screen with nobody in it. Every day it:
+
+1. Installs the package on a clean runner (CPU-only PyTorch, about 1.5 GB smaller than the CUDA wheel).
+2. Runs the **whole** batch pipeline from scratch: ingest -> clean -> backtest -> retrain -> 7-day forecast with intervals -> anomaly detection -> capacity -> monitoring -> export.
+3. Commits the new `site/data/` to `main` as `github-actions[bot]`, with `[skip ci]` so the data commit does not re-trigger CI.
+4. Cloudflare picks up the push and redeploys. The run's metrics (`run_summary.json`, `detection_eval.json`, backtest CSVs) are kept as a workflow artifact for 14 days, so you can compare model quality across days.
+
+Details that matter:
+
+- **A new scenario every day.** On synthetic data the seed is the run date (`--seed 20261102`), so each refresh is a different month of traffic with different outages and spikes, not the same picture re-rendered. A manual run can pin a seed to reproduce a day exactly.
+- **Two modes.** The scheduled run skips SARIMA/Prophet and Optuna (about 10 min on a 4-core runner). Run it manually with **full = true** (Actions -> Refresh dashboard -> Run workflow) to include the per-series benchmarks and 12 Optuna trials (about 15-20 min; 13 min on a 4-core machine during development).
+- **Safe by construction.** `concurrency` stops two refreshes racing on `main`. The commit step exits cleanly when nothing changed. The job has a 75-minute timeout, and only `contents: write` permission.
+- **Retrain is built in.** Every refresh retrains from scratch, and `monitoring.json` records whether the model lost to seasonal-naive for 2 consecutive folds (the retrain trigger). The Monitoring tab shows it.
+- **Switching to real data** is one line: replace the `nettraffic run $ARGS` command with `nettraffic run --milan-dir <path> --no-stat-models` once the feed lands somewhere the runner can read.
+
+If `main` gets branch protection, allow `github-actions[bot]` to push, or the commit step fails.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every PR and every push to `main`: ruff lint and format check, the pytest suite, a 60-cell end-to-end pipeline smoke run, and a Docker build whose container must answer `/health` within 60 s.
 
 The API image (`Dockerfile`, `docker-compose.yml`) serves the same batch outputs for on-demand queries:
 

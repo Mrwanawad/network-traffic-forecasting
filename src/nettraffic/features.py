@@ -149,6 +149,7 @@ def build_features(
     feats["hour_of_week"] = bcast(how)
     feats["is_offday"] = bcast(ctx.cal.is_offday[times].astype(np.int8))
     feats["is_holiday"] = bcast(ctx.cal.is_holiday[times].astype(np.int8))
+    feats["is_eve"] = bcast(ctx.cal.is_eve[times].astype(np.int8))
     feats["is_event"] = ctx.events[:, times].astype(np.int8)
     feats["area"] = np.broadcast_to(ctx.area[:, None], (n_cells, len(times)))
 
