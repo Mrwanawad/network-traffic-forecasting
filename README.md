@@ -4,6 +4,8 @@ Forecast telecom traffic (SMS, calls, internet) per cell, flag abnormal drops an
 
 **Live dashboard:** https://network-traffic-forecasting.mrwaanawad.workers.dev, refreshed every day by GitHub Actions (see [Automated daily refresh](#automated-daily-refresh)).
 
+<p align="center"><img src="docs/demo.gif" width="100%" alt="Dashboard walkthrough: fleet KPIs, opening the top critical alert, actual vs. expected traffic with the flagged drop and 7-day forecast, and the capacity-risk chart"/></p>
+
 The full design is in [`docs/architecture.md`](docs/architecture.md). This README covers how the code maps to it, how to run it, and what the numbers look like.
 
 ## Results (synthetic run: 500 cells, 61 days, 3 evaluated backtest folds)
