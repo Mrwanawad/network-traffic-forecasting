@@ -1,9 +1,18 @@
-"""Demo scene. Serve first:  python -m http.server 8770 -d site
-Then: python docs/demo/scene.py && python ~/.claude/skills/demo-gif/scripts/compose.py docs/demo/build --out docs/demo.gif
+"""Demo scene for docs/demo.gif.
+
+Serve first:  python -m http.server 8770 -d site
+Then:
+    python docs/demo/scene.py
+    python ~/.claude/skills/demo-gif/scripts/compose.py docs/demo/build --out docs/demo.gif
 """
-import os, sys; sys.path.insert(0, os.path.expanduser("~/.claude/skills/demo-gif/scripts"))
+
+import os
+import sys
 from pathlib import Path
-from director import Director, run
+
+sys.path.insert(0, os.path.expanduser("~/.claude/skills/demo-gif/scripts"))
+from director import Director, run  # from the demo-gif skill, added to sys.path above
+
 
 async def scene(d: Director):
     p = d.page
@@ -22,11 +31,18 @@ async def scene(d: Director):
     await d.focus(p.locator("#cell-chart"), zoom=1.3)
     await d.arrow(p.locator("#cell-chart .shapelayer path").first, "Flagged drop", side="auto")
     await d.hold(2.0)
-    await d.clear_arrow(); await d.unfocus()
+    await d.clear_arrow()
+    await d.unfocus()
     await d.caption("Spot capacity risk early", step=4)
     await d.click(p.get_by_role("button", name="Capacity"))
     await p.locator("#cap-chart.js-plotly-plot").wait_for()
     await d.hold(1.8)
 
-run(scene, out=str(Path(__file__).with_name("build")), title="Network Traffic Forecasting",
-    subtitle="Per-cell forecasts, anomaly alerts and capacity flags", url_label="traffic-ops.local")
+
+run(
+    scene,
+    out=str(Path(__file__).with_name("build")),
+    title="Network Traffic Forecasting",
+    subtitle="Per-cell forecasts, anomaly alerts and capacity flags",
+    url_label="traffic-ops.local",
+)
